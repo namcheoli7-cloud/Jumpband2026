@@ -163,7 +163,7 @@
         <h2>모둠 자동 배정</h2>
         <div class="row">
           <select id="groupClassSelect"><option value="">학급 선택</option></select>
-          <input type="number" id="groupCount" value="6" min="2" max="10" style="width:70px;" />
+          <input type="number" id="groupCount" value="5" min="2" max="10" style="width:70px;" />
           <span class="hint">개 모둠으로</span>
           <button onclick="autoAssignGroups()">무작위 배정</button>
         </div>
@@ -399,7 +399,7 @@ function topicLabel(expertTopic){
 
 async function autoAssignGroups(){
   const classId = document.getElementById('groupClassSelect').value;
-  const groupCount = parseInt(document.getElementById('groupCount').value, 10) || 6;
+  const groupCount = parseInt(document.getElementById('groupCount').value, 10) || 5;
   if (!classId) return;
   if (!confirm('기존 모둠 배정을 덮어씁니다. 계속할까요?')) return;
 
