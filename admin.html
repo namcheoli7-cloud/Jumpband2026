@@ -84,6 +84,23 @@
     display:inline-block; margin-left:6px; padding:2px 8px; border-radius:999px;
     background:#EAF1FF; color:var(--navy); font-size:11px; font-weight:700;
   }
+  .assign-table select{width:100%; font-size:13px; padding:7px 8px;}
+  .board-grid{display:flex; gap:12px; flex-wrap:wrap;}
+  .board-col{
+    flex:1 1 190px; min-width:190px; max-width:240px; background:var(--bg); border:1px solid var(--line);
+    border-radius:14px; padding:12px;
+  }
+  .board-col.unassigned{background:#FDF3F3; border-color:#F5D6D6;}
+  .board-col h3{font-size:13px; margin:0 0 4px; color:var(--navy); font-weight:800;}
+  .board-col .coverage{font-size:11px; color:var(--muted); margin-bottom:8px;}
+  .chip{
+    display:flex; align-items:center; justify-content:space-between; gap:6px;
+    background:#fff; border:1px solid var(--line); border-radius:10px;
+    padding:6px 9px; margin-bottom:6px; font-size:12.5px;
+  }
+  .chip .name{display:flex; align-items:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .topic-dot{width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:6px; flex-shrink:0;}
+  .chip .topic-num{font-size:10.5px; color:var(--muted); font-weight:700; white-space:nowrap; margin-left:6px;}
 
   /* modal */
   #modalOverlay{
@@ -160,26 +177,22 @@
       </div>
 
       <div class="card">
-        <h2>모둠 자동 배정</h2>
+        <h2>모둠 · 전문가주제 배정</h2>
         <div class="row">
-          <select id="groupClassSelect"><option value="">학급 선택</option></select>
-          <input type="number" id="groupCount" value="5" min="2" max="10" style="width:70px;" />
-          <span class="hint">개 모둠으로</span>
-          <button onclick="autoAssignGroups()">무작위 배정</button>
+          <select id="assignClassSelect"><option value="">학급 선택</option></select>
+          <input type="number" id="groupCount" value="5" min="1" max="10" style="width:70px;" />
+          <span class="hint">개 모둠</span>
+          <input type="number" id="topicSizeInput" value="2" min="1" max="6" style="width:70px;" />
+          <span class="hint">개 동작씩 전문가주제</span>
         </div>
-        <div class="hint">기존 모둠 배정을 덮어씁니다. 학기 내내 유지할 모둠이므로 신중하게 실행하세요.</div>
-        <div id="rosterTableWrap" style="margin-top:14px;"></div>
+        <div class="hint">학생별로 모둠과 전문가 주제를 직접 선택하세요. 선택하면 바로 저장됩니다.</div>
+        <div id="assignTableWrap" style="margin-top:14px; max-height:440px; overflow-y:auto;"></div>
       </div>
 
       <div class="card">
-        <h2>전문가 주제 자동 배정 (직소모형)</h2>
-        <div class="row">
-          <select id="expertClassSelect"><option value="">학급 선택</option></select>
-          <input type="number" id="topicSizeInput" value="2" min="1" max="6" style="width:70px;" />
-          <span class="hint">개 동작씩 묶어서</span>
-          <button onclick="autoAssignExpertTopics()">전문가 주제 배정</button>
-        </div>
-        <div class="hint">학급 전체 학생을 무작위로 섞어 동작 묶음(전문가 주제)을 균등하게 나눠줍니다. 2~3차시 전문가 집단 학습 전에 실행하세요. 학습자료 탭에서 동작 이름·유튜브 링크를 먼저 등록해두면 배정 결과가 더 알아보기 쉽습니다.</div>
+        <h2>모둠 현황판</h2>
+        <div class="hint">모둠별 학생 구성과 전문가 주제 커버 현황을 한눈에 확인하세요.</div>
+        <div id="groupBoardWrap" style="margin-top:12px;"></div>
       </div>
     </div>
 
@@ -300,6 +313,7 @@ async function loadSettings(){
   deadline = data.deadline ? data.deadline.toDate() : null;
 
   document.getElementById('topicSizeInput').value = TOPIC_SIZE;
+  document.getElementById('groupCount').value = data.groupCount || 5;
   document.getElementById('playlistInput').value = PLAYLIST_URL;
   if (deadline){
     document.getElementById('deadlineInput').value = toLocalInputValue(deadline);
@@ -315,8 +329,7 @@ async function loadClasses(){
   classesCache = snap.docs.map(d=>({ id:d.id, ...d.data() }));
   const selects = [
     document.getElementById('rosterClassSelect'),
-    document.getElementById('groupClassSelect'),
-    document.getElementById('expertClassSelect'),
+    document.getElementById('assignClassSelect'),
     document.getElementById('dashClassSelect'),
   ];
   selects.forEach(sel=>{
@@ -342,10 +355,6 @@ async function addClass(){
 }
 
 /* ---------- 학생 명단 ---------- */
-document.getElementById('groupClassSelect').addEventListener('change', renderRosterTable);
-document.getElementById('rosterClassSelect').addEventListener('change', renderRosterTable);
-document.getElementById('expertClassSelect').addEventListener('change', renderRosterTable);
-
 async function bulkAddStudents(){
   const classId = document.getElementById('rosterClassSelect').value;
   const text = document.getElementById('rosterText').value.trim();
@@ -369,79 +378,151 @@ async function bulkAddStudents(){
   await batch.commit();
   hint.textContent = `${count}명 등록 완료`;
   document.getElementById('rosterText').value = '';
-  document.getElementById('groupClassSelect').value = classId;
-  renderRosterTable();
-}
-
-async function renderRosterTable(){
-  const classId = document.getElementById('groupClassSelect').value
-    || document.getElementById('rosterClassSelect').value
-    || document.getElementById('expertClassSelect').value;
-  const wrap = document.getElementById('rosterTableWrap');
-  if (!classId){ wrap.innerHTML = ''; return; }
-  const snap = await db.collection('classes').doc(classId).collection('students').orderBy('number').get();
-  if (snap.empty){ wrap.innerHTML = '<div class="hint">등록된 학생이 없습니다.</div>'; return; }
-  let rows = '';
-  snap.forEach(d=>{
-    const s = d.data();
-    rows += `<tr><td>${s.number}</td><td>${s.name}</td><td>${s.group ?? '-'}모둠</td><td>${topicLabel(s.expertTopic)}</td></tr>`;
-  });
-  wrap.innerHTML = `<table><thead><tr><th>번호</th><th>이름</th><th>모둠</th><th>전문가 주제</th></tr></thead><tbody>${rows}</tbody></table>`;
+  document.getElementById('assignClassSelect').value = classId;
+  await loadAssignmentPanel();
 }
 
 function topicLabel(expertTopic){
   if (expertTopic === null || expertTopic === undefined) return '-';
-  const start = expertTopic * TOPIC_SIZE;
-  const end = Math.min(start + TOPIC_SIZE, MOVEMENTS.length);
+  return topicLabelForSize(expertTopic, TOPIC_SIZE);
+}
+function topicLabelForSize(topicIdx, topicSize){
+  const start = topicIdx * topicSize;
+  const end = Math.min(start + topicSize, MOVEMENTS.length);
   const names = MOVEMENTS.slice(start, end).map(m=>m.name).join('/');
-  return `${expertTopic+1}번 (${names})`;
+  return `${topicIdx+1}번 (${names})`;
 }
 
-async function autoAssignGroups(){
-  const classId = document.getElementById('groupClassSelect').value;
+/* ---------- 모둠 · 전문가주제 수동 배정 ---------- */
+const TOPIC_COLORS = ['FF6F3C','2EC4B6','28345C','E4552A','8B5FBF','4C9F70','C9A227','1D8A99'];
+let currentAssignStudents = [];
+
+document.getElementById('assignClassSelect').addEventListener('change', loadAssignmentPanel);
+document.getElementById('groupCount').addEventListener('change', onAssignSettingsChange);
+document.getElementById('topicSizeInput').addEventListener('change', onAssignSettingsChange);
+
+async function loadAssignmentPanel(){
+  const classId = document.getElementById('assignClassSelect').value;
+  if (!classId){
+    currentAssignStudents = [];
+    document.getElementById('assignTableWrap').innerHTML = '';
+    document.getElementById('groupBoardWrap').innerHTML = '';
+    return;
+  }
+  const snap = await db.collection('classes').doc(classId).collection('students').orderBy('number').get();
+  currentAssignStudents = snap.docs.map(d=>({ id: d.id, ...d.data() }));
+  renderAssignTable();
+  renderGroupBoard();
+}
+
+async function onAssignSettingsChange(){
   const groupCount = parseInt(document.getElementById('groupCount').value, 10) || 5;
-  if (!classId) return;
-  if (!confirm('기존 모둠 배정을 덮어씁니다. 계속할까요?')) return;
-
-  const snap = await db.collection('classes').doc(classId).collection('students').get();
-  const docs = snap.docs.slice();
-  // Fisher-Yates shuffle
-  for (let i = docs.length - 1; i > 0; i--){
-    const j = Math.floor(Math.random() * (i + 1));
-    [docs[i], docs[j]] = [docs[j], docs[i]];
-  }
-  const batch = db.batch();
-  docs.forEach((d, idx)=>{
-    const group = (idx % groupCount) + 1;
-    batch.update(d.ref, { group });
-  });
-  await batch.commit();
-  renderRosterTable();
+  const topicSize = parseInt(document.getElementById('topicSizeInput').value, 10) || 2;
+  TOPIC_SIZE = topicSize;
+  await db.collection('settings').doc('config').set({ topicSize, groupCount }, { merge: true });
+  renderAssignTable();
+  renderGroupBoard();
 }
 
-async function autoAssignExpertTopics(){
-  const classId = document.getElementById('expertClassSelect').value;
+function buildSelectOptions(options, current){
+  const currentStr = (current === null || current === undefined) ? '' : String(current);
+  return options.map(o=>{
+    const sel = String(o.value) === currentStr ? ' selected' : '';
+    return `<option value="${o.value}"${sel}>${o.label}</option>`;
+  }).join('');
+}
+
+function renderAssignTable(){
+  const wrap = document.getElementById('assignTableWrap');
+  if (!currentAssignStudents.length){ wrap.innerHTML = '<div class="hint">등록된 학생이 없습니다.</div>'; return; }
+
+  const groupCount = parseInt(document.getElementById('groupCount').value, 10) || 5;
   const topicSize = parseInt(document.getElementById('topicSizeInput').value, 10) || 2;
-  if (!classId) return;
-  if (!confirm('기존 전문가 주제 배정을 덮어씁니다. 계속할까요?')) return;
+  const topicCount = Math.ceil(MOVEMENTS.length / topicSize) || 1;
 
-  const topicCount = Math.ceil(MOVEMENTS.length / topicSize);
-  const snap = await db.collection('classes').doc(classId).collection('students').get();
-  const docs = snap.docs.slice();
-  for (let i = docs.length - 1; i > 0; i--){
-    const j = Math.floor(Math.random() * (i + 1));
-    [docs[i], docs[j]] = [docs[j], docs[i]];
-  }
-  const batch = db.batch();
-  docs.forEach((d, idx)=>{
-    const expertTopic = idx % topicCount;
-    batch.update(d.ref, { expertTopic });
+  const groupOptions = [{ value: '', label: '미배정' }];
+  for (let g = 1; g <= groupCount; g++) groupOptions.push({ value: g, label: `${g}모둠` });
+
+  const topicOptions = [{ value: '', label: '미배정' }];
+  for (let t = 0; t < topicCount; t++) topicOptions.push({ value: t, label: topicLabelForSize(t, topicSize) });
+
+  const rows = currentAssignStudents.map(s=>`
+    <tr>
+      <td>${s.number}</td>
+      <td>${s.name}</td>
+      <td><select data-student="${s.id}" data-field="group" onchange="onAssignChange(this)">${buildSelectOptions(groupOptions, s.group)}</select></td>
+      <td><select data-student="${s.id}" data-field="expertTopic" onchange="onAssignChange(this)">${buildSelectOptions(topicOptions, s.expertTopic)}</select></td>
+    </tr>
+  `).join('');
+
+  wrap.innerHTML = `<table class="assign-table"><thead><tr><th>번호</th><th>이름</th><th>모둠</th><th>전문가 주제</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+async function onAssignChange(selectEl){
+  const studentId = selectEl.dataset.student;
+  const field = selectEl.dataset.field;
+  const raw = selectEl.value;
+  const value = raw === '' ? null : parseInt(raw, 10);
+  const classId = document.getElementById('assignClassSelect').value;
+
+  await db.collection('classes').doc(classId).collection('students').doc(studentId).update({ [field]: value });
+
+  const stu = currentAssignStudents.find(s=>s.id===studentId);
+  if (stu) stu[field] = value;
+  renderGroupBoard();
+}
+
+function renderGroupBoard(){
+  const wrap = document.getElementById('groupBoardWrap');
+  if (!currentAssignStudents.length){ wrap.innerHTML = ''; return; }
+
+  const groupCount = parseInt(document.getElementById('groupCount').value, 10) || 5;
+  const topicSize = parseInt(document.getElementById('topicSizeInput').value, 10) || 2;
+  const topicCount = Math.ceil(MOVEMENTS.length / topicSize) || 1;
+
+  const byGroup = {};
+  for (let g = 1; g <= groupCount; g++) byGroup[g] = [];
+  const unassigned = [];
+  currentAssignStudents.forEach(s=>{
+    if (s.group && byGroup[s.group]) byGroup[s.group].push(s);
+    else unassigned.push(s);
   });
-  await batch.commit();
 
-  TOPIC_SIZE = topicSize;
-  await db.collection('settings').doc('config').set({ topicSize }, { merge: true });
-  renderRosterTable();
+  let html = '<div class="board-grid">';
+  for (let g = 1; g <= groupCount; g++){
+    const members = byGroup[g];
+    const covered = new Set(members.filter(m=>m.expertTopic !== null && m.expertTopic !== undefined).map(m=>m.expertTopic));
+    html += `
+      <div class="board-col">
+        <h3>${g}모둠 (${members.length}명)</h3>
+        <div class="coverage">전문가 주제 커버 ${covered.size}/${topicCount}</div>
+        ${members.map(chipHtml).join('') || '<div class="hint">배정된 학생 없음</div>'}
+      </div>
+    `;
+  }
+  if (unassigned.length){
+    html += `
+      <div class="board-col unassigned">
+        <h3>미배정 (${unassigned.length}명)</h3>
+        <div class="coverage">모둠을 선택해주세요</div>
+        ${unassigned.map(chipHtml).join('')}
+      </div>
+    `;
+  }
+  html += '</div>';
+  wrap.innerHTML = html;
+}
+
+function chipHtml(m){
+  const hasTopic = m.expertTopic !== null && m.expertTopic !== undefined;
+  const color = hasTopic ? TOPIC_COLORS[m.expertTopic % TOPIC_COLORS.length] : 'C9CDDB';
+  const topicText = hasTopic ? `${m.expertTopic + 1}번` : '미배정';
+  return `
+    <div class="chip">
+      <span class="name"><span class="topic-dot" style="background:${color};"></span>${m.number}. ${m.name}</span>
+      <span class="topic-num">${topicText}</span>
+    </div>
+  `;
 }
 
 /* ---------- 마감 설정 ---------- */
