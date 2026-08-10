@@ -130,6 +130,26 @@
     margin-top:10px; font-size:12.5px; color:var(--muted); word-break:break-all;
   }
   .my-link a{color:var(--navy-light);}
+  .info-row{display:flex; justify-content:space-between; font-size:14px; padding:6px 0;}
+  .info-row b{color:var(--navy);}
+  .playlist-link{
+    display:inline-block; margin-bottom:12px; font-size:13px; font-weight:700;
+    color:var(--navy); text-decoration:none; background:#F0F4FF; padding:9px 12px; border-radius:10px;
+  }
+  .movement-item{border-bottom:1px solid var(--line); padding:10px 0;}
+  .movement-item:last-child{border-bottom:none;}
+  .movement-item.mine{background:#FFF9F5; margin:0 -18px; padding:10px 18px; border-radius:8px;}
+  .movement-head{display:flex; justify-content:space-between; align-items:center; cursor:pointer; gap:8px;}
+  .movement-head .name{font-size:14px; font-weight:600; display:flex; align-items:center; flex-wrap:wrap; gap:6px;}
+  .movement-head .toggle{color:var(--navy-light); font-size:12px; font-weight:700; white-space:nowrap;}
+  .my-topic-badge{
+    display:inline-block; padding:2px 8px; border-radius:999px;
+    background:#FFF1E9; color:var(--accent-dark); font-size:11px; font-weight:700;
+  }
+  .no-link{color:var(--muted); font-size:12.5px;}
+  .movement-embed{margin-top:10px; aspect-ratio:16/9; border-radius:10px; overflow:hidden; background:#000; display:none;}
+  .movement-embed.open{display:block;}
+  .movement-embed iframe{width:100%; height:100%; border:0;}
 </style>
 </head>
 <body>
@@ -145,6 +165,11 @@
     <h2>내 정보 선택</h2>
     <select id="classSelect"><option value="">학급 선택</option></select>
     <select id="studentSelect" disabled><option value="">먼저 학급을 선택하세요</option></select>
+  </div>
+
+  <div class="card" id="myInfoCard" style="display:none;">
+    <h2>내 모둠 정보</h2>
+    <div id="myInfoBody"></div>
   </div>
 
   <div class="card" id="statusCard" style="display:none;">
@@ -171,6 +196,12 @@
     <div id="resultBody"></div>
   </div>
 
+  <div class="card" id="materialsCard">
+    <h2>기본동작 12가지 학습영상</h2>
+    <div id="playlistLinkWrap"></div>
+    <div id="movementListWrap"></div>
+  </div>
+
 </div>
 
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -182,9 +213,15 @@ let currentClassName = "";
 let currentStudentId = null;
 let currentStudent = null;
 let deadline = null;
+let MOVEMENTS = [];
+let TOPIC_SIZE = 2;
+let PLAYLIST_URL = '';
+const openMovements = new Set();
 
 const classSelect = document.getElementById('classSelect');
 const studentSelect = document.getElementById('studentSelect');
+const myInfoCard = document.getElementById('myInfoCard');
+const myInfoBody = document.getElementById('myInfoBody');
 const statusCard = document.getElementById('statusCard');
 const statusBadge = document.getElementById('statusBadge');
 const deadlineNote = document.getElementById('deadlineNote');
@@ -195,12 +232,17 @@ const linkWarning = document.getElementById('linkWarning');
 const submitBtn = document.getElementById('submitBtn');
 const resultCard = document.getElementById('resultCard');
 const resultBody = document.getElementById('resultBody');
+const playlistLinkWrap = document.getElementById('playlistLinkWrap');
+const movementListWrap = document.getElementById('movementListWrap');
 
 async function init(){
   const cfgSnap = await db.collection('settings').doc('config').get();
-  if (cfgSnap.exists && cfgSnap.data().deadline){
-    deadline = cfgSnap.data().deadline.toDate();
-  }
+  const cfg = cfgSnap.exists ? cfgSnap.data() : {};
+  if (cfg.deadline) deadline = cfg.deadline.toDate();
+  MOVEMENTS = (cfg.movements && cfg.movements.length) ? cfg.movements : [];
+  TOPIC_SIZE = cfg.topicSize || 2;
+  PLAYLIST_URL = cfg.playlistUrl || '';
+
   const classesSnap = await db.collection('classes').orderBy('order').get();
   classesSnap.forEach(doc=>{
     const opt = document.createElement('option');
@@ -208,6 +250,8 @@ async function init(){
     opt.textContent = doc.data().name;
     classSelect.appendChild(opt);
   });
+
+  renderMaterials();
 }
 init();
 
@@ -219,7 +263,9 @@ classSelect.addEventListener('change', async ()=>{
   statusCard.style.display = 'none';
   uploadCard.style.display = 'none';
   resultCard.style.display = 'none';
-  if (!currentClassId) return;
+  myInfoCard.style.display = 'none';
+  currentStudent = null;
+  if (!currentClassId){ renderMaterials(); return; }
 
   const studentsSnap = await db.collection('classes').doc(currentClassId)
     .collection('students').orderBy('number').get();
@@ -236,17 +282,39 @@ studentSelect.addEventListener('change', async ()=>{
   currentStudentId = studentSelect.value;
   resultCard.style.display = 'none';
   uploadCard.style.display = 'none';
+  myInfoCard.style.display = 'none';
   linkInput.value = '';
   linkWarning.style.display = 'none';
   submitBtn.disabled = true;
-  if (!currentStudentId){ statusCard.style.display='none'; return; }
+  if (!currentStudentId){ statusCard.style.display='none'; currentStudent = null; renderMaterials(); return; }
 
   const studentDoc = await db.collection('classes').doc(currentClassId)
     .collection('students').doc(currentStudentId).get();
   currentStudent = studentDoc.data();
 
+  renderMyInfo();
+  renderMaterials();
   await refreshSubmissionStatus();
 });
+
+function renderMyInfo(){
+  if (!currentStudent) return;
+  myInfoCard.style.display = 'block';
+  const groupText = currentStudent.group ? `${currentStudent.group}모둠` : '아직 배정 전';
+  const topicText = topicLabel(currentStudent.expertTopic);
+  myInfoBody.innerHTML = `
+    <div class="info-row"><span>소속 모둠</span><b>${groupText}</b></div>
+    <div class="info-row"><span>내 전문가 주제</span><b>${topicText}</b></div>
+  `;
+}
+
+function topicLabel(expertTopic){
+  if (expertTopic === null || expertTopic === undefined || !MOVEMENTS.length) return '아직 배정 전';
+  const start = expertTopic * TOPIC_SIZE;
+  const end = Math.min(start + TOPIC_SIZE, MOVEMENTS.length);
+  const names = MOVEMENTS.slice(start, end).map(m=>m.name).join(', ');
+  return names || `${expertTopic+1}번`;
+}
 
 async function refreshSubmissionStatus(){
   statusCard.style.display = 'block';
@@ -338,14 +406,85 @@ submitBtn.addEventListener('click', async ()=>{
 function renderResult(sub){
   let rows = '';
   (sub.scores || []).forEach((s, i)=>{
-    rows += `<tr><td>${MOVEMENTS[i] || ('동작 '+(i+1))}</td><td>${s} / ${MAX_SCORE_PER_MOVEMENT}</td></tr>`;
+    const m = MOVEMENTS[i];
+    rows += `<tr><td>${m ? m.name : ('동작 '+(i+1))}</td><td>${s} / ${m ? (m.maxScore ?? 2) : 2}</td></tr>`;
   });
-  const maxTotal = MOVEMENTS.length * MAX_SCORE_PER_MOVEMENT;
+  const maxTotal = MOVEMENTS.reduce((a,m)=> a + (m.maxScore ?? 2), 0);
   resultBody.innerHTML = `
     <table class="score-table">${rows}</table>
     <div class="total-score"><span>총점</span><span class="num">${sub.total ?? 0} / ${maxTotal}</span></div>
     ${sub.comment ? `<div class="comment-box">${escapeHtml(sub.comment)}</div>` : ''}
   `;
+}
+
+function renderMaterials(){
+  if (PLAYLIST_URL){
+    playlistLinkWrap.innerHTML = `<a class="playlist-link" href="${PLAYLIST_URL}" target="_blank" rel="noopener">▶ 전체 재생목록 한번에 보기</a>`;
+  } else {
+    playlistLinkWrap.innerHTML = '';
+  }
+
+  if (!MOVEMENTS.length){
+    movementListWrap.innerHTML = '<div class="no-link">아직 등록된 학습영상이 없습니다.</div>';
+    return;
+  }
+
+  const myStart = (currentStudent && currentStudent.expertTopic != null) ? currentStudent.expertTopic * TOPIC_SIZE : -1;
+  const myEnd = myStart >= 0 ? myStart + TOPIC_SIZE - 1 : -1;
+
+  movementListWrap.innerHTML = MOVEMENTS.map((m, i)=>{
+    const isMine = i >= myStart && i <= myEnd;
+    const badge = isMine ? '<span class="my-topic-badge">내 담당</span>' : '';
+    const embedId = `movEmbed${i}`;
+    const linkPart = m.youtubeLink
+      ? `<span class="toggle" data-idx="${i}">▶ 영상보기</span>`
+      : '<span class="no-link">영상 준비중</span>';
+    return `
+      <div class="movement-item ${isMine ? 'mine' : ''}">
+        <div class="movement-head" data-idx="${i}">
+          <span class="name">${i+1}. ${m.name} ${badge}</span>
+          ${linkPart}
+        </div>
+        <div class="movement-embed" id="${embedId}"></div>
+      </div>
+    `;
+  }).join('');
+
+  movementListWrap.querySelectorAll('.movement-head').forEach(head=>{
+    head.addEventListener('click', ()=>{
+      const idx = head.dataset.idx;
+      const m = MOVEMENTS[idx];
+      if (!m || !m.youtubeLink) return;
+      const embedEl = document.getElementById(`movEmbed${idx}`);
+      const isOpen = embedEl.classList.contains('open');
+      if (isOpen){
+        embedEl.classList.remove('open');
+        embedEl.innerHTML = '';
+        openMovements.delete(idx);
+      } else {
+        const vid = extractYoutubeId(m.youtubeLink);
+        embedEl.innerHTML = vid
+          ? `<iframe src="https://www.youtube.com/embed/${vid}" allowfullscreen></iframe>`
+          : `<a class="video-link-fallback" href="${m.youtubeLink}" target="_blank" rel="noopener">새 탭에서 열기</a>`;
+        embedEl.classList.add('open');
+        openMovements.add(idx);
+      }
+    });
+  });
+}
+
+function extractYoutubeId(url){
+  const patterns = [
+    /youtu\.be\/([a-zA-Z0-9_-]{6,})/,
+    /[?&]v=([a-zA-Z0-9_-]{6,})/,
+    /youtube\.com\/embed\/([a-zA-Z0-9_-]{6,})/,
+    /youtube\.com\/shorts\/([a-zA-Z0-9_-]{6,})/,
+  ];
+  for (const p of patterns){
+    const m = url.match(p);
+    if (m) return m[1];
+  }
+  return null;
 }
 
 function formatDate(d){

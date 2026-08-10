@@ -74,6 +74,16 @@
   .stat .num{font-size:24px; font-weight:800; color:var(--navy);}
   .stat .label{font-size:12px; color:var(--muted); margin-top:2px;}
   .hint{font-size:12px; color:var(--muted); margin-top:6px; line-height:1.5;}
+  .movement-row{
+    display:grid; grid-template-columns:28px 1fr 1fr 64px; gap:8px; align-items:center;
+    padding:8px 0; border-bottom:1px solid var(--line);
+  }
+  .movement-row .idx{color:var(--muted); font-size:12px; font-weight:700;}
+  .movement-row input{width:100%;}
+  .expert-badge{
+    display:inline-block; margin-left:6px; padding:2px 8px; border-radius:999px;
+    background:#EAF1FF; color:var(--navy); font-size:11px; font-weight:700;
+  }
 
   /* modal */
   #modalOverlay{
@@ -119,6 +129,7 @@
 
   <div class="tabs">
     <button class="tab-btn active" data-tab="roster">학급·학생 관리</button>
+    <button class="tab-btn" data-tab="materials">학습자료</button>
     <button class="tab-btn" data-tab="settings">마감 설정</button>
     <button class="tab-btn" data-tab="dashboard">채점 대시보드</button>
   </div>
@@ -159,6 +170,33 @@
         <div class="hint">기존 모둠 배정을 덮어씁니다. 학기 내내 유지할 모둠이므로 신중하게 실행하세요.</div>
         <div id="rosterTableWrap" style="margin-top:14px;"></div>
       </div>
+
+      <div class="card">
+        <h2>전문가 주제 자동 배정 (직소모형)</h2>
+        <div class="row">
+          <select id="expertClassSelect"><option value="">학급 선택</option></select>
+          <input type="number" id="topicSizeInput" value="2" min="1" max="6" style="width:70px;" />
+          <span class="hint">개 동작씩 묶어서</span>
+          <button onclick="autoAssignExpertTopics()">전문가 주제 배정</button>
+        </div>
+        <div class="hint">학급 전체 학생을 무작위로 섞어 동작 묶음(전문가 주제)을 균등하게 나눠줍니다. 2~3차시 전문가 집단 학습 전에 실행하세요. 학습자료 탭에서 동작 이름·유튜브 링크를 먼저 등록해두면 배정 결과가 더 알아보기 쉽습니다.</div>
+      </div>
+    </div>
+
+    <!-- 학습자료 -->
+    <div class="panel" id="panel-materials">
+      <div class="card">
+        <h2>기본동작 12가지 학습영상</h2>
+        <div class="row">
+          <input type="url" id="playlistInput" placeholder="전체 재생목록 링크 (선택, OT 시간에 한 번에 보여줄 때 사용)" style="flex:1; min-width:220px;" />
+        </div>
+        <div id="movementEditList"></div>
+        <div class="row" style="margin-top:12px;">
+          <button class="accent" onclick="saveMovements()">저장</button>
+          <span class="hint" id="movementsSaveHint"></span>
+        </div>
+        <div class="hint">여기서 저장한 동작명·유튜브 링크·배점은 학생용 페이지와 채점 화면에 바로 반영됩니다.</div>
+      </div>
     </div>
 
     <!-- 마감 설정 -->
@@ -173,10 +211,7 @@
       </div>
       <div class="card">
         <h2>기본동작 12가지 이름 / 배점</h2>
-        <div class="hint">동작 이름과 동작당 만점은 firebase-config.js 파일에서 직접 수정합니다 (MOVEMENTS, MAX_SCORE_PER_MOVEMENT). 현재 설정:</div>
-        <table style="margin-top:10px;">
-          <tbody id="movementListBody"></tbody>
-        </table>
+        <div class="hint">동작 이름, 유튜브 링크, 배점은 <b>학습자료</b> 탭에서 관리합니다.</div>
       </div>
     </div>
 
@@ -240,11 +275,39 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
 
 /* ---------- 초기 로드 ---------- */
 let classesCache = [];
+let MOVEMENTS = [];      // [{ name, youtubeLink, maxScore }, ...]
+let TOPIC_SIZE = 2;
+let PLAYLIST_URL = '';
+let deadline = null;
 
 async function bootstrap(){
   await loadClasses();
-  renderMovementList();
-  await loadDeadlineIntoInput();
+  await loadSettings();
+  renderMovementEditList();
+}
+
+function defaultMovements(){
+  return Array.from({ length: 12 }, (_, i) => ({ name: `동작 ${i+1}`, youtubeLink: '', maxScore: 2 }));
+}
+
+async function loadSettings(){
+  const snap = await db.collection('settings').doc('config').get();
+  const data = snap.exists ? snap.data() : {};
+  const needsSeed = !data.movements || data.movements.length !== 12;
+  MOVEMENTS = needsSeed ? defaultMovements() : data.movements;
+  TOPIC_SIZE = data.topicSize || 2;
+  PLAYLIST_URL = data.playlistUrl || '';
+  deadline = data.deadline ? data.deadline.toDate() : null;
+
+  document.getElementById('topicSizeInput').value = TOPIC_SIZE;
+  document.getElementById('playlistInput').value = PLAYLIST_URL;
+  if (deadline){
+    document.getElementById('deadlineInput').value = toLocalInputValue(deadline);
+    document.getElementById('deadlineHint').textContent = `현재 설정: ${deadline.toLocaleString('ko-KR')}`;
+  }
+  if (needsSeed){
+    await db.collection('settings').doc('config').set({ movements: MOVEMENTS, topicSize: TOPIC_SIZE }, { merge: true });
+  }
 }
 
 async function loadClasses(){
@@ -253,6 +316,7 @@ async function loadClasses(){
   const selects = [
     document.getElementById('rosterClassSelect'),
     document.getElementById('groupClassSelect'),
+    document.getElementById('expertClassSelect'),
     document.getElementById('dashClassSelect'),
   ];
   selects.forEach(sel=>{
@@ -280,6 +344,7 @@ async function addClass(){
 /* ---------- 학생 명단 ---------- */
 document.getElementById('groupClassSelect').addEventListener('change', renderRosterTable);
 document.getElementById('rosterClassSelect').addEventListener('change', renderRosterTable);
+document.getElementById('expertClassSelect').addEventListener('change', renderRosterTable);
 
 async function bulkAddStudents(){
   const classId = document.getElementById('rosterClassSelect').value;
@@ -298,7 +363,7 @@ async function bulkAddStudents(){
     const name = parts[1];
     if (isNaN(number) || !name) return;
     const ref = db.collection('classes').doc(classId).collection('students').doc();
-    batch.set(ref, { number, name, group: null });
+    batch.set(ref, { number, name, group: null, expertTopic: null });
     count++;
   });
   await batch.commit();
@@ -309,7 +374,9 @@ async function bulkAddStudents(){
 }
 
 async function renderRosterTable(){
-  const classId = document.getElementById('groupClassSelect').value || document.getElementById('rosterClassSelect').value;
+  const classId = document.getElementById('groupClassSelect').value
+    || document.getElementById('rosterClassSelect').value
+    || document.getElementById('expertClassSelect').value;
   const wrap = document.getElementById('rosterTableWrap');
   if (!classId){ wrap.innerHTML = ''; return; }
   const snap = await db.collection('classes').doc(classId).collection('students').orderBy('number').get();
@@ -317,9 +384,17 @@ async function renderRosterTable(){
   let rows = '';
   snap.forEach(d=>{
     const s = d.data();
-    rows += `<tr><td>${s.number}</td><td>${s.name}</td><td>${s.group ?? '-'}모둠</td></tr>`;
+    rows += `<tr><td>${s.number}</td><td>${s.name}</td><td>${s.group ?? '-'}모둠</td><td>${topicLabel(s.expertTopic)}</td></tr>`;
   });
-  wrap.innerHTML = `<table><thead><tr><th>번호</th><th>이름</th><th>모둠</th></tr></thead><tbody>${rows}</tbody></table>`;
+  wrap.innerHTML = `<table><thead><tr><th>번호</th><th>이름</th><th>모둠</th><th>전문가 주제</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function topicLabel(expertTopic){
+  if (expertTopic === null || expertTopic === undefined) return '-';
+  const start = expertTopic * TOPIC_SIZE;
+  const end = Math.min(start + TOPIC_SIZE, MOVEMENTS.length);
+  const names = MOVEMENTS.slice(start, end).map(m=>m.name).join('/');
+  return `${expertTopic+1}번 (${names})`;
 }
 
 async function autoAssignGroups(){
@@ -344,15 +419,32 @@ async function autoAssignGroups(){
   renderRosterTable();
 }
 
-/* ---------- 마감 설정 ---------- */
-async function loadDeadlineIntoInput(){
-  const snap = await db.collection('settings').doc('config').get();
-  if (snap.exists && snap.data().deadline){
-    const d = snap.data().deadline.toDate();
-    document.getElementById('deadlineInput').value = toLocalInputValue(d);
-    document.getElementById('deadlineHint').textContent = `현재 설정: ${d.toLocaleString('ko-KR')}`;
+async function autoAssignExpertTopics(){
+  const classId = document.getElementById('expertClassSelect').value;
+  const topicSize = parseInt(document.getElementById('topicSizeInput').value, 10) || 2;
+  if (!classId) return;
+  if (!confirm('기존 전문가 주제 배정을 덮어씁니다. 계속할까요?')) return;
+
+  const topicCount = Math.ceil(MOVEMENTS.length / topicSize);
+  const snap = await db.collection('classes').doc(classId).collection('students').get();
+  const docs = snap.docs.slice();
+  for (let i = docs.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [docs[i], docs[j]] = [docs[j], docs[i]];
   }
+  const batch = db.batch();
+  docs.forEach((d, idx)=>{
+    const expertTopic = idx % topicCount;
+    batch.update(d.ref, { expertTopic });
+  });
+  await batch.commit();
+
+  TOPIC_SIZE = topicSize;
+  await db.collection('settings').doc('config').set({ topicSize }, { merge: true });
+  renderRosterTable();
 }
+
+/* ---------- 마감 설정 ---------- */
 async function saveDeadline(){
   const val = document.getElementById('deadlineInput').value;
   if (!val) return;
@@ -360,15 +452,47 @@ async function saveDeadline(){
   await db.collection('settings').doc('config').set({
     deadline: firebase.firestore.Timestamp.fromDate(date)
   }, { merge: true });
+  deadline = date;
   document.getElementById('deadlineHint').textContent = `저장됨: ${date.toLocaleString('ko-KR')}`;
 }
 function toLocalInputValue(d){
   const pad = n=>String(n).padStart(2,'0');
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
-function renderMovementList(){
-  const body = document.getElementById('movementListBody');
-  body.innerHTML = MOVEMENTS.map((m,i)=>`<tr><td>${i+1}</td><td>${m}</td><td>동작당 만점 ${MAX_SCORE_PER_MOVEMENT}점</td></tr>`).join('');
+
+/* ---------- 학습자료 ---------- */
+function renderMovementEditList(){
+  const wrap = document.getElementById('movementEditList');
+  wrap.innerHTML = MOVEMENTS.map((m, i)=>`
+    <div class="movement-row">
+      <span class="idx">${i+1}</span>
+      <input type="text" value="${escapeAttr(m.name)}" data-field="name" data-idx="${i}" placeholder="동작 이름" />
+      <input type="url" value="${escapeAttr(m.youtubeLink || '')}" data-field="youtubeLink" data-idx="${i}" placeholder="유튜브 링크" />
+      <input type="number" value="${m.maxScore ?? 2}" min="1" max="10" data-field="maxScore" data-idx="${i}" />
+    </div>
+  `).join('');
+}
+async function saveMovements(){
+  const rows = document.querySelectorAll('#movementEditList .movement-row');
+  const updated = Array.from(rows).map(row=>{
+    const nameInput = row.querySelector('[data-field="name"]');
+    const linkInput = row.querySelector('[data-field="youtubeLink"]');
+    const scoreInput = row.querySelector('[data-field="maxScore"]');
+    return {
+      name: nameInput.value.trim() || '동작',
+      youtubeLink: linkInput.value.trim(),
+      maxScore: Math.max(1, parseInt(scoreInput.value, 10) || 2),
+    };
+  });
+  const playlistUrl = document.getElementById('playlistInput').value.trim();
+  await db.collection('settings').doc('config').set({ movements: updated, playlistUrl }, { merge: true });
+  MOVEMENTS = updated;
+  PLAYLIST_URL = playlistUrl;
+  document.getElementById('movementsSaveHint').textContent = '저장 완료';
+  setTimeout(()=>{ document.getElementById('movementsSaveHint').textContent = ''; }, 2500);
+}
+function escapeAttr(str){
+  return String(str).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
 }
 
 /* ---------- 채점 대시보드 ---------- */
@@ -394,7 +518,7 @@ async function refreshDashboard(){
     if (!sub){ statusHtml = '<span class="badge b-none">미제출</span>'; action=''; none++; }
     else if (sub.status === 'graded'){ statusHtml = `<span class="badge b-done">채점완료 ${sub.total}점</span>`; action=`<button class="ghost" onclick="openGradeModal('${s.id}')">다시 채점</button>`; done++; }
     else { statusHtml = '<span class="badge b-wait">채점 대기</span>'; action=`<button class="accent" onclick="openGradeModal('${s.id}')">채점하기</button>`; wait++; }
-    return `<tr><td>${s.number}</td><td>${s.name}</td><td>${s.group ?? '-'}모둠</td><td>${statusHtml}</td><td>${action}</td></tr>`;
+    return `<tr><td>${s.number}</td><td>${s.name}</td><td>${s.group ?? '-'}모둠</td><td>${topicLabel(s.expertTopic)}</td><td>${statusHtml}</td><td>${action}</td></tr>`;
   }).join('');
 
   statRow.innerHTML = `
@@ -403,7 +527,7 @@ async function refreshDashboard(){
     <div class="stat"><div class="num">${wait}</div><div class="label">채점 대기</div></div>
     <div class="stat"><div class="num">${done}</div><div class="label">채점 완료</div></div>
   `;
-  wrap.innerHTML = `<table><thead><tr><th>번호</th><th>이름</th><th>모둠</th><th>상태</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+  wrap.innerHTML = `<table><thead><tr><th>번호</th><th>이름</th><th>모둠</th><th>전문가주제</th><th>상태</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
 
   window._dashStudents = students;
   window._dashSubs = subsMap;
@@ -436,8 +560,8 @@ function openGradeModal(studentId){
 
   const scores = sub.scores && sub.scores.length === MOVEMENTS.length ? sub.scores : MOVEMENTS.map(()=>0);
   const inputs = MOVEMENTS.map((m,i)=>`
-    <label>${i+1}. ${m}</label>
-    <input type="number" min="0" max="${MAX_SCORE_PER_MOVEMENT}" value="${scores[i]}" data-idx="${i}" class="score-input" oninput="updateModalTotal()" />
+    <label>${i+1}. ${m.name}</label>
+    <input type="number" min="0" max="${m.maxScore ?? 2}" value="${scores[i]}" data-idx="${i}" class="score-input" oninput="updateModalTotal()" />
   `).join('');
 
   document.getElementById('modal').innerHTML = `
@@ -458,7 +582,7 @@ function updateModalTotal(){
   const inputs = document.querySelectorAll('.score-input');
   let total = 0;
   inputs.forEach(i=> total += Number(i.value) || 0);
-  const max = MOVEMENTS.length * MAX_SCORE_PER_MOVEMENT;
+  const max = MOVEMENTS.reduce((a,m)=> a + (m.maxScore ?? 2), 0);
   document.getElementById('modalTotal').textContent = `총점: ${total} / ${max}`;
 }
 function closeModal(){ document.getElementById('modalOverlay').style.display = 'none'; }
@@ -485,14 +609,14 @@ async function exportCsv(){
   const subs = window._dashSubs || {};
   const className = classesCache.find(c=>c.id===classId)?.name || classId;
 
-  const header = ['번호','이름','모둠','상태','총점', ...MOVEMENTS];
+  const header = ['번호','이름','모둠','전문가주제','상태','총점', ...MOVEMENTS.map(m=>m.name)];
   const lines = [header.join(',')];
   students.forEach(s=>{
     const sub = subs[s.id];
     const status = !sub ? '미제출' : (sub.status === 'graded' ? '채점완료' : '채점대기');
     const total = sub && sub.status === 'graded' ? sub.total : '';
     const scores = sub && sub.scores && sub.scores.length ? sub.scores : MOVEMENTS.map(()=>'');
-    lines.push([s.number, s.name, s.group ?? '', status, total, ...scores].join(','));
+    lines.push([s.number, s.name, s.group ?? '', topicLabel(s.expertTopic), status, total, ...scores].join(','));
   });
   const csv = '\uFEFF' + lines.join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
