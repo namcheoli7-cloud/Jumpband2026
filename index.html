@@ -297,23 +297,32 @@ studentSelect.addEventListener('change', async ()=>{
   await refreshSubmissionStatus();
 });
 
+function getTopics(s){
+  if (!s) return [];
+  if (Array.isArray(s.expertTopics)) return s.expertTopics;
+  if (s.expertTopic !== null && s.expertTopic !== undefined) return [s.expertTopic]; // 이전 데이터 호환
+  return [];
+}
+
 function renderMyInfo(){
   if (!currentStudent) return;
   myInfoCard.style.display = 'block';
   const groupText = currentStudent.group ? `${currentStudent.group}모둠` : '아직 배정 전';
-  const topicText = topicLabel(currentStudent.expertTopic);
+  const topicText = topicLabel(getTopics(currentStudent));
   myInfoBody.innerHTML = `
     <div class="info-row"><span>소속 모둠</span><b>${groupText}</b></div>
     <div class="info-row"><span>내 전문가 주제</span><b>${topicText}</b></div>
   `;
 }
 
-function topicLabel(expertTopic){
-  if (expertTopic === null || expertTopic === undefined || !MOVEMENTS.length) return '아직 배정 전';
-  const start = expertTopic * TOPIC_SIZE;
-  const end = Math.min(start + TOPIC_SIZE, MOVEMENTS.length);
-  const names = MOVEMENTS.slice(start, end).map(m=>m.name).join(', ');
-  return names || `${expertTopic+1}번`;
+function topicLabel(topics){
+  if (!topics.length || !MOVEMENTS.length) return '아직 배정 전';
+  return topics.map(t=>{
+    const start = t * TOPIC_SIZE;
+    const end = Math.min(start + TOPIC_SIZE, MOVEMENTS.length);
+    const names = MOVEMENTS.slice(start, end).map(m=>m.name).join(', ');
+    return names || `${t+1}번`;
+  }).join(' + ');
 }
 
 async function refreshSubmissionStatus(){
@@ -429,11 +438,11 @@ function renderMaterials(){
     return;
   }
 
-  const myStart = (currentStudent && currentStudent.expertTopic != null) ? currentStudent.expertTopic * TOPIC_SIZE : -1;
-  const myEnd = myStart >= 0 ? myStart + TOPIC_SIZE - 1 : -1;
+  const myTopics = currentStudent ? getTopics(currentStudent) : [];
+  const myRanges = myTopics.map(t=>[t * TOPIC_SIZE, Math.min(t * TOPIC_SIZE + TOPIC_SIZE, MOVEMENTS.length) - 1]);
 
   movementListWrap.innerHTML = MOVEMENTS.map((m, i)=>{
-    const isMine = i >= myStart && i <= myEnd;
+    const isMine = myRanges.some(([start, end])=> i >= start && i <= end);
     const badge = isMine ? '<span class="my-topic-badge">내 담당</span>' : '';
     const embedId = `movEmbed${i}`;
     const linkPart = m.youtubeLink

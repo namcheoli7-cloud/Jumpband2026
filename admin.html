@@ -85,6 +85,7 @@
     background:#EAF1FF; color:var(--navy); font-size:11px; font-weight:700;
   }
   .assign-table select{width:100%; font-size:13px; padding:7px 8px;}
+  .topic-select-pair{display:flex; flex-direction:column; gap:4px;}
   .board-grid{display:flex; gap:12px; flex-wrap:wrap;}
   .board-col{
     flex:1 1 190px; min-width:190px; max-width:240px; background:var(--bg); border:1px solid var(--line);
@@ -185,7 +186,11 @@
           <input type="number" id="topicSizeInput" value="2" min="1" max="6" style="width:70px;" />
           <span class="hint">개 동작씩 전문가주제</span>
         </div>
-        <div class="hint">학생별로 모둠과 전문가 주제를 직접 선택하세요. 선택하면 바로 저장됩니다.</div>
+        <div class="row">
+          <button onclick="autoAssignGroups()">모둠 무작위 배정</button>
+          <button onclick="autoAssignExpertTopics()">전문가 주제 무작위 배정</button>
+        </div>
+        <div class="hint">무작위 배정 후 아래 표에서 학생별로 자유롭게 조정하세요. 전문가 주제는 학생 1명당 최대 2개까지 선택할 수 있어 인원이 적은 모둠(예: 5명이 6개 주제를 나눠야 하는 경우)에도 대응됩니다. 표에서 선택하면 바로 저장됩니다.</div>
         <div id="assignTableWrap" style="margin-top:14px; max-height:440px; overflow-y:auto;"></div>
       </div>
 
@@ -372,7 +377,7 @@ async function bulkAddStudents(){
     const name = parts[1];
     if (isNaN(number) || !name) return;
     const ref = db.collection('classes').doc(classId).collection('students').doc();
-    batch.set(ref, { number, name, group: null, expertTopic: null });
+    batch.set(ref, { number, name, group: null, expertTopics: [] });
     count++;
   });
   await batch.commit();
@@ -382,9 +387,14 @@ async function bulkAddStudents(){
   await loadAssignmentPanel();
 }
 
-function topicLabel(expertTopic){
-  if (expertTopic === null || expertTopic === undefined) return '-';
-  return topicLabelForSize(expertTopic, TOPIC_SIZE);
+function getTopics(s){
+  if (Array.isArray(s.expertTopics)) return s.expertTopics;
+  if (s.expertTopic !== null && s.expertTopic !== undefined) return [s.expertTopic]; // 이전 데이터 호환
+  return [];
+}
+function topicLabel(topics){
+  if (!topics || !topics.length) return '-';
+  return topics.map(t=>topicLabelForSize(t, TOPIC_SIZE)).join(' + ');
 }
 function topicLabelForSize(topicIdx, topicSize){
   const start = topicIdx * topicSize;
@@ -424,6 +434,85 @@ async function onAssignSettingsChange(){
   renderGroupBoard();
 }
 
+function shuffle(arr){
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--){
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+async function autoAssignGroups(){
+  const classId = document.getElementById('assignClassSelect').value;
+  const groupCount = parseInt(document.getElementById('groupCount').value, 10) || 5;
+  if (!classId){ alert('학급을 먼저 선택하세요.'); return; }
+  if (!confirm('기존 모둠 배정을 덮어씁니다. 계속할까요?')) return;
+
+  const docs = shuffle(currentAssignStudents);
+  const batch = db.batch();
+  docs.forEach((s, idx)=>{
+    const group = (idx % groupCount) + 1;
+    batch.update(db.collection('classes').doc(classId).collection('students').doc(s.id), { group });
+    s.group = group;
+  });
+  await batch.commit();
+  renderAssignTable();
+  renderGroupBoard();
+}
+
+async function autoAssignExpertTopics(){
+  const classId = document.getElementById('assignClassSelect').value;
+  const topicSize = parseInt(document.getElementById('topicSizeInput').value, 10) || 2;
+  const topicCount = Math.ceil(MOVEMENTS.length / topicSize) || 1;
+  if (!classId){ alert('학급을 먼저 선택하세요.'); return; }
+  if (!confirm('기존 전문가 주제 배정을 덮어씁니다. 계속할까요?')) return;
+
+  const hasUngrouped = currentAssignStudents.some(s=>!s.group);
+  if (hasUngrouped && !confirm('아직 모둠이 없는 학생이 있습니다. 모둠별로 주제를 고르게 나누려면 먼저 모둠 배정을 하는 게 좋아요. 그래도 계속할까요?')) return;
+
+  // 모둠(원소속 모둠)별로 묶어서, 그 모둠 안에서 전문가 주제를 고르게 분배
+  // (한 모둠이 12가지 동작을 모두 커버하도록 하기 위함. 인원이 topicCount보다 적으면 일부 학생이 2개씩 맡음)
+  const byGroup = {};
+  currentAssignStudents.forEach(s=>{
+    const key = s.group || 'ungrouped';
+    (byGroup[key] = byGroup[key] || []).push(s);
+  });
+
+  const batch = db.batch();
+  Object.values(byGroup).forEach(rawMembers=>{
+    const members = shuffle(rawMembers);
+    const topicsPerMember = {};
+    members.forEach(m=> topicsPerMember[m.id] = []);
+
+    for (let t = 0; t < topicCount; t++){
+      let member = members[t % members.length];
+      if (topicsPerMember[member.id].length >= 2){
+        const alt = members.find(m2=> topicsPerMember[m2.id].length < 2);
+        if (!alt) continue; // 모둠 인원이 너무 적어 더 담을 수 없는 경우 해당 주제는 배정하지 않음
+        member = alt;
+      }
+      topicsPerMember[member.id].push(t);
+    }
+
+    members.forEach(m=>{
+      const topics = topicsPerMember[m.id];
+      batch.update(db.collection('classes').doc(classId).collection('students').doc(m.id), {
+        expertTopics: topics,
+        expertTopic: firebase.firestore.FieldValue.delete(),
+      });
+      m.expertTopics = topics;
+      delete m.expertTopic;
+    });
+  });
+
+  await batch.commit();
+  TOPIC_SIZE = topicSize;
+  await db.collection('settings').doc('config').set({ topicSize }, { merge: true });
+  renderAssignTable();
+  renderGroupBoard();
+}
+
 function buildSelectOptions(options, current){
   const currentStr = (current === null || current === undefined) ? '' : String(current);
   return options.map(o=>{
@@ -443,19 +532,27 @@ function renderAssignTable(){
   const groupOptions = [{ value: '', label: '미배정' }];
   for (let g = 1; g <= groupCount; g++) groupOptions.push({ value: g, label: `${g}모둠` });
 
-  const topicOptions = [{ value: '', label: '미배정' }];
-  for (let t = 0; t < topicCount; t++) topicOptions.push({ value: t, label: topicLabelForSize(t, topicSize) });
+  const topicOptionsBase = [{ value: '', label: '없음' }];
+  for (let t = 0; t < topicCount; t++) topicOptionsBase.push({ value: t, label: topicLabelForSize(t, topicSize) });
 
-  const rows = currentAssignStudents.map(s=>`
+  const rows = currentAssignStudents.map(s=>{
+    const topics = getTopics(s);
+    return `
     <tr>
       <td>${s.number}</td>
       <td>${s.name}</td>
       <td><select data-student="${s.id}" data-field="group" onchange="onAssignChange(this)">${buildSelectOptions(groupOptions, s.group)}</select></td>
-      <td><select data-student="${s.id}" data-field="expertTopic" onchange="onAssignChange(this)">${buildSelectOptions(topicOptions, s.expertTopic)}</select></td>
+      <td>
+        <div class="topic-select-pair">
+          <select data-student="${s.id}" data-topic-slot="0" onchange="onTopicChange(this)">${buildSelectOptions(topicOptionsBase, topics[0])}</select>
+          <select data-student="${s.id}" data-topic-slot="1" onchange="onTopicChange(this)">${buildSelectOptions(topicOptionsBase, topics[1])}</select>
+        </div>
+      </td>
     </tr>
-  `).join('');
+  `;
+  }).join('');
 
-  wrap.innerHTML = `<table class="assign-table"><thead><tr><th>번호</th><th>이름</th><th>모둠</th><th>전문가 주제</th></tr></thead><tbody>${rows}</tbody></table>`;
+  wrap.innerHTML = `<table class="assign-table"><thead><tr><th>번호</th><th>이름</th><th>모둠</th><th>전문가 주제 (최대 2개)</th></tr></thead><tbody>${rows}</tbody></table>`;
 }
 
 async function onAssignChange(selectEl){
@@ -469,6 +566,23 @@ async function onAssignChange(selectEl){
 
   const stu = currentAssignStudents.find(s=>s.id===studentId);
   if (stu) stu[field] = value;
+  renderGroupBoard();
+}
+
+async function onTopicChange(selectEl){
+  const studentId = selectEl.dataset.student;
+  const classId = document.getElementById('assignClassSelect').value;
+  const row = selectEl.closest('tr');
+  const slot0 = row.querySelector('[data-topic-slot="0"]').value;
+  const slot1 = row.querySelector('[data-topic-slot="1"]').value;
+
+  const topics = [...new Set([slot0, slot1].filter(v=>v !== ''))].map(v=>parseInt(v, 10));
+
+  await db.collection('classes').doc(classId).collection('students').doc(studentId)
+    .update({ expertTopics: topics, expertTopic: firebase.firestore.FieldValue.delete() });
+
+  const stu = currentAssignStudents.find(s=>s.id===studentId);
+  if (stu){ stu.expertTopics = topics; delete stu.expertTopic; }
   renderGroupBoard();
 }
 
@@ -491,7 +605,8 @@ function renderGroupBoard(){
   let html = '<div class="board-grid">';
   for (let g = 1; g <= groupCount; g++){
     const members = byGroup[g];
-    const covered = new Set(members.filter(m=>m.expertTopic !== null && m.expertTopic !== undefined).map(m=>m.expertTopic));
+    const covered = new Set();
+    members.forEach(m=> getTopics(m).forEach(t=>covered.add(t)));
     html += `
       <div class="board-col">
         <h3>${g}모둠 (${members.length}명)</h3>
@@ -514,12 +629,15 @@ function renderGroupBoard(){
 }
 
 function chipHtml(m){
-  const hasTopic = m.expertTopic !== null && m.expertTopic !== undefined;
-  const color = hasTopic ? TOPIC_COLORS[m.expertTopic % TOPIC_COLORS.length] : 'C9CDDB';
-  const topicText = hasTopic ? `${m.expertTopic + 1}번` : '미배정';
+  const topics = getTopics(m);
+  const hasTopic = topics.length > 0;
+  const dots = hasTopic
+    ? topics.map(t=>`<span class="topic-dot" style="background:${TOPIC_COLORS[t % TOPIC_COLORS.length]};"></span>`).join('')
+    : `<span class="topic-dot" style="background:C9CDDB;"></span>`;
+  const topicText = hasTopic ? topics.map(t=>`${t+1}번`).join(', ') : '미배정';
   return `
     <div class="chip">
-      <span class="name"><span class="topic-dot" style="background:${color};"></span>${m.number}. ${m.name}</span>
+      <span class="name">${dots}${m.number}. ${m.name}</span>
       <span class="topic-num">${topicText}</span>
     </div>
   `;
@@ -599,7 +717,7 @@ async function refreshDashboard(){
     if (!sub){ statusHtml = '<span class="badge b-none">미제출</span>'; action=''; none++; }
     else if (sub.status === 'graded'){ statusHtml = `<span class="badge b-done">채점완료 ${sub.total}점</span>`; action=`<button class="ghost" onclick="openGradeModal('${s.id}')">다시 채점</button>`; done++; }
     else { statusHtml = '<span class="badge b-wait">채점 대기</span>'; action=`<button class="accent" onclick="openGradeModal('${s.id}')">채점하기</button>`; wait++; }
-    return `<tr><td>${s.number}</td><td>${s.name}</td><td>${s.group ?? '-'}모둠</td><td>${topicLabel(s.expertTopic)}</td><td>${statusHtml}</td><td>${action}</td></tr>`;
+    return `<tr><td>${s.number}</td><td>${s.name}</td><td>${s.group ?? '-'}모둠</td><td>${topicLabel(getTopics(s))}</td><td>${statusHtml}</td><td>${action}</td></tr>`;
   }).join('');
 
   statRow.innerHTML = `
@@ -697,7 +815,7 @@ async function exportCsv(){
     const status = !sub ? '미제출' : (sub.status === 'graded' ? '채점완료' : '채점대기');
     const total = sub && sub.status === 'graded' ? sub.total : '';
     const scores = sub && sub.scores && sub.scores.length ? sub.scores : MOVEMENTS.map(()=>'');
-    lines.push([s.number, s.name, s.group ?? '', topicLabel(s.expertTopic), status, total, ...scores].join(','));
+    lines.push([s.number, s.name, s.group ?? '', topicLabel(getTopics(s)), status, total, ...scores].join(','));
   });
   const csv = '\uFEFF' + lines.join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
