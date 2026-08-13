@@ -511,11 +511,23 @@ function renderAssignTable(){
           <select data-student="${s.id}" data-topic-slot="1" onchange="onTopicChange(this)">${buildSelectOptions(topicOptionsBase, topics[1])}</select>
         </div>
       </td>
+      <td><button class="danger-ghost" onclick="deleteStudent('${s.id}', '${escapeAttr(s.name)}')">삭제</button></td>
     </tr>
   `;
   }).join('');
 
-  wrap.innerHTML = `<table class="assign-table"><thead><tr><th>번호</th><th>이름</th><th>모둠</th><th>전문가 주제 (최대 2개)</th></tr></thead><tbody>${rows}</tbody></table>`;
+  wrap.innerHTML = `<table class="assign-table"><thead><tr><th>번호</th><th>이름</th><th>모둠</th><th>전문가 주제 (최대 2개)</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+async function deleteStudent(studentId, name){
+  const classId = document.getElementById('assignClassSelect').value;
+  if (!classId) return;
+  if (!confirm(`${name} 학생을 명단에서 삭제할까요? 되돌릴 수 없습니다.`)) return;
+
+  await db.collection('classes').doc(classId).collection('students').doc(studentId).delete();
+  currentAssignStudents = currentAssignStudents.filter(s=>s.id !== studentId);
+  renderAssignTable();
+  renderGroupBoard();
 }
 
 async function onAssignChange(selectEl){
