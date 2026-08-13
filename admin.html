@@ -65,14 +65,6 @@
   table{width:100%; border-collapse:collapse; font-size:13px;}
   th, td{padding:9px 8px; border-bottom:1px solid var(--line); text-align:left;}
   th{color:var(--muted); font-weight:700; font-size:12px;}
-  .badge{padding:3px 9px; border-radius:999px; font-size:11px; font-weight:700; display:inline-block;}
-  .b-none{background:#F0F1F6; color:var(--muted);}
-  .b-wait{background:#FFF1E9; color:var(--accent-dark);}
-  .b-done{background:#E8FBF9; color:#0F9184;}
-  .stat-row{display:flex; gap:14px; flex-wrap:wrap; margin-bottom:16px;}
-  .stat{background:#fff; border:1px solid var(--line); border-radius:14px; padding:14px 18px; min-width:110px;}
-  .stat .num{font-size:24px; font-weight:800; color:var(--navy);}
-  .stat .label{font-size:12px; color:var(--muted); margin-top:2px;}
   .hint{font-size:12px; color:var(--muted); margin-top:6px; line-height:1.5;}
   .movement-row{
     display:grid; grid-template-columns:28px 1fr 1fr 64px; gap:8px; align-items:center;
@@ -102,27 +94,6 @@
   .chip .name{display:flex; align-items:center; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
   .topic-dot{width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:6px; flex-shrink:0;}
   .chip .topic-num{font-size:10.5px; color:var(--muted); font-weight:700; white-space:nowrap; margin-left:6px;}
-
-  /* modal */
-  #modalOverlay{
-    position:fixed; inset:0; background:rgba(22,33,62,.55); display:none;
-    align-items:center; justify-content:center; padding:16px; z-index:50;
-  }
-  #modal{background:#fff; border-radius:18px; padding:22px; width:100%; max-width:480px; max-height:88vh; overflow-y:auto;}
-  #modal h3{margin:0 0 12px; font-size:16px; color:var(--navy);}
-  #modal video{width:100%; border-radius:12px; margin-bottom:14px; background:#000;}
-  .video-embed-wrap{width:100%; aspect-ratio:16/9; border-radius:12px; overflow:hidden; margin-bottom:10px; background:#000;}
-  .video-embed-wrap iframe{width:100%; height:100%; border:0;}
-  .video-link-btn{
-    display:inline-block; width:100%; text-align:center; box-sizing:border-box;
-    padding:12px; border-radius:10px; background:var(--navy); color:#fff;
-    font-weight:700; font-size:14px; margin-bottom:14px; text-decoration:none;
-  }
-  .score-grid{display:grid; grid-template-columns:1fr 70px; gap:8px 10px; align-items:center; margin-bottom:14px;}
-  .score-grid label{font-size:13px;}
-  .score-grid input{width:70px; text-align:center;}
-  .modal-total{font-weight:800; color:var(--navy); font-size:15px; margin-bottom:10px; text-align:right;}
-  .modal-actions{display:flex; gap:8px; justify-content:flex-end; margin-top:10px;}
 </style>
 </head>
 <body>
@@ -148,8 +119,7 @@
   <div class="tabs">
     <button class="tab-btn active" data-tab="roster">학급·학생 관리</button>
     <button class="tab-btn" data-tab="materials">학습자료</button>
-    <button class="tab-btn" data-tab="settings">마감 설정</button>
-    <button class="tab-btn" data-tab="dashboard">채점 대시보드</button>
+    <button class="tab-btn" data-tab="settings">제출 설정</button>
   </div>
 
   <div class="content">
@@ -217,15 +187,25 @@
       </div>
     </div>
 
-    <!-- 마감 설정 -->
+    <!-- 제출 설정 -->
     <div class="panel" id="panel-settings">
+      <div class="card">
+        <h2>구글 클래스룸 링크</h2>
+        <div class="row">
+          <input type="url" id="classroomUrlInput" placeholder="https://classroom.google.com/c/..." style="flex:1; min-width:260px;" />
+        </div>
+        <div class="hint">학생용 페이지의 "구글 클래스룸에서 제출하기" 버튼이 이 링크로 연결됩니다. 과제 제출과 채점은 이제 구글 클래스룸에서 진행합니다.</div>
+      </div>
       <div class="card">
         <h2>1차 평가 제출 마감</h2>
         <div class="row">
           <input type="datetime-local" id="deadlineInput" />
-          <button class="accent" onclick="saveDeadline()">저장</button>
         </div>
-        <div class="hint" id="deadlineHint"></div>
+        <div class="hint" id="deadlineHint">학생용 페이지에 마감 일시가 안내 문구로 표시됩니다 (제출 자체는 막지 않습니다).</div>
+      </div>
+      <div class="row">
+        <button class="accent" onclick="saveSubmissionSettings()">저장</button>
+        <span class="hint" id="submissionSettingsHint"></span>
       </div>
       <div class="card">
         <h2>기본동작 12가지 이름 / 배점</h2>
@@ -233,23 +213,7 @@
       </div>
     </div>
 
-    <!-- 채점 대시보드 -->
-    <div class="panel" id="panel-dashboard">
-      <div class="card">
-        <div class="row" style="justify-content:space-between;">
-          <select id="dashClassSelect"><option value="">학급 선택</option></select>
-          <button class="ghost" onclick="exportCsv()">CSV 내보내기</button>
-        </div>
-        <div class="stat-row" id="statRow"></div>
-        <div id="dashTableWrap"></div>
-      </div>
-    </div>
-
   </div>
-</div>
-
-<div id="modalOverlay">
-  <div id="modal"></div>
 </div>
 
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
@@ -287,7 +251,6 @@ document.querySelectorAll('.tab-btn').forEach(btn=>{
     document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
     btn.classList.add('active');
     document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
-    if (btn.dataset.tab === 'dashboard') refreshDashboard();
   });
 });
 
@@ -320,9 +283,10 @@ async function loadSettings(){
   document.getElementById('topicSizeInput').value = TOPIC_SIZE;
   document.getElementById('groupCount').value = data.groupCount || 5;
   document.getElementById('playlistInput').value = PLAYLIST_URL;
+  document.getElementById('classroomUrlInput').value = data.classroomUrl || '';
   if (deadline){
     document.getElementById('deadlineInput').value = toLocalInputValue(deadline);
-    document.getElementById('deadlineHint').textContent = `현재 설정: ${deadline.toLocaleString('ko-KR')}`;
+    document.getElementById('deadlineHint').textContent = `현재 마감: ${deadline.toLocaleString('ko-KR')}`;
   }
   if (needsSeed){
     await db.collection('settings').doc('config').set({ movements: MOVEMENTS, topicSize: TOPIC_SIZE }, { merge: true });
@@ -335,7 +299,6 @@ async function loadClasses(){
   const selects = [
     document.getElementById('rosterClassSelect'),
     document.getElementById('assignClassSelect'),
-    document.getElementById('dashClassSelect'),
   ];
   selects.forEach(sel=>{
     const current = sel.value;
@@ -643,16 +606,21 @@ function chipHtml(m){
   `;
 }
 
-/* ---------- 마감 설정 ---------- */
-async function saveDeadline(){
-  const val = document.getElementById('deadlineInput').value;
-  if (!val) return;
-  const date = new Date(val);
-  await db.collection('settings').doc('config').set({
-    deadline: firebase.firestore.Timestamp.fromDate(date)
-  }, { merge: true });
-  deadline = date;
-  document.getElementById('deadlineHint').textContent = `저장됨: ${date.toLocaleString('ko-KR')}`;
+/* ---------- 제출 설정 ---------- */
+async function saveSubmissionSettings(){
+  const classroomUrl = document.getElementById('classroomUrlInput').value.trim();
+  const deadlineVal = document.getElementById('deadlineInput').value;
+  const payload = { classroomUrl };
+  if (deadlineVal){
+    const date = new Date(deadlineVal);
+    payload.deadline = firebase.firestore.Timestamp.fromDate(date);
+    deadline = date;
+    document.getElementById('deadlineHint').textContent = `현재 마감: ${date.toLocaleString('ko-KR')}`;
+  }
+  await db.collection('settings').doc('config').set(payload, { merge: true });
+  const hint = document.getElementById('submissionSettingsHint');
+  hint.textContent = '저장 완료';
+  setTimeout(()=>{ hint.textContent = ''; }, 2500);
 }
 function toLocalInputValue(d){
   const pad = n=>String(n).padStart(2,'0');
@@ -692,139 +660,6 @@ async function saveMovements(){
 }
 function escapeAttr(str){
   return String(str).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
-}
-
-/* ---------- 채점 대시보드 ---------- */
-document.getElementById('dashClassSelect').addEventListener('change', refreshDashboard);
-
-async function refreshDashboard(){
-  const classId = document.getElementById('dashClassSelect').value;
-  const wrap = document.getElementById('dashTableWrap');
-  const statRow = document.getElementById('statRow');
-  if (!classId){ wrap.innerHTML=''; statRow.innerHTML=''; return; }
-
-  const studentsSnap = await db.collection('classes').doc(classId).collection('students').orderBy('number').get();
-  const students = studentsSnap.docs.map(d=>({ id:d.id, ...d.data() }));
-
-  const subsSnap = await db.collection('submissions').where('classId','==',classId).get();
-  const subsMap = {};
-  subsSnap.forEach(d=> subsMap[d.data().studentId] = { id:d.id, ...d.data() });
-
-  let none=0, wait=0, done=0;
-  let rows = students.map(s=>{
-    const sub = subsMap[s.id];
-    let statusHtml, action;
-    if (!sub){ statusHtml = '<span class="badge b-none">미제출</span>'; action=''; none++; }
-    else if (sub.status === 'graded'){ statusHtml = `<span class="badge b-done">채점완료 ${sub.total}점</span>`; action=`<button class="ghost" onclick="openGradeModal('${s.id}')">다시 채점</button>`; done++; }
-    else { statusHtml = '<span class="badge b-wait">채점 대기</span>'; action=`<button class="accent" onclick="openGradeModal('${s.id}')">채점하기</button>`; wait++; }
-    return `<tr><td>${s.number}</td><td>${s.name}</td><td>${s.group ?? '-'}모둠</td><td>${topicLabel(getTopics(s))}</td><td>${statusHtml}</td><td>${action}</td></tr>`;
-  }).join('');
-
-  statRow.innerHTML = `
-    <div class="stat"><div class="num">${students.length}</div><div class="label">전체 학생</div></div>
-    <div class="stat"><div class="num">${none}</div><div class="label">미제출</div></div>
-    <div class="stat"><div class="num">${wait}</div><div class="label">채점 대기</div></div>
-    <div class="stat"><div class="num">${done}</div><div class="label">채점 완료</div></div>
-  `;
-  wrap.innerHTML = `<table><thead><tr><th>번호</th><th>이름</th><th>모둠</th><th>전문가주제</th><th>상태</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
-
-  window._dashStudents = students;
-  window._dashSubs = subsMap;
-  window._dashClassId = classId;
-}
-
-function videoEmbedHtml(link){
-  if (!link) return '<div class="hint">제출된 링크가 없습니다.</div>';
-  const idMatch = link.match(/\/d\/([a-zA-Z0-9_-]+)/) || link.match(/[?&]id=([a-zA-Z0-9_-]+)/);
-  if (idMatch){
-    const embedSrc = `https://drive.google.com/file/d/${idMatch[1]}/preview`;
-    return `
-      <div class="video-embed-wrap"><iframe src="${embedSrc}" allow="autoplay" allowfullscreen></iframe></div>
-      <a class="video-link-btn" href="${link}" target="_blank" rel="noopener">↗ 새 탭에서 원본 열기</a>
-    `;
-  }
-  // 드라이브 형식이 아니거나 ID를 못 찾은 경우: 링크 버튼만 제공
-  return `<a class="video-link-btn" href="${link}" target="_blank" rel="noopener">↗ 영상 링크 열기 (${escapeHtmlAdmin(link)})</a>`;
-}
-function escapeHtmlAdmin(str){
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
-}
-
-function openGradeModal(studentId){
-  const student = window._dashStudents.find(s=>s.id===studentId);
-  const sub = window._dashSubs[studentId];
-  if (!sub){ alert('아직 제출된 영상이 없습니다.'); return; }
-
-  const scores = sub.scores && sub.scores.length === MOVEMENTS.length ? sub.scores : MOVEMENTS.map(()=>0);
-  const inputs = MOVEMENTS.map((m,i)=>`
-    <label>${i+1}. ${m.name}</label>
-    <input type="number" min="0" max="${m.maxScore ?? 2}" value="${scores[i]}" data-idx="${i}" class="score-input" oninput="updateModalTotal()" />
-  `).join('');
-
-  document.getElementById('modal').innerHTML = `
-    <h3>${student.number}번 ${student.name} · ${student.group ?? '-'}모둠</h3>
-    ${videoEmbedHtml(sub.videoUrl)}
-    <div class="score-grid">${inputs}</div>
-    <div class="modal-total" id="modalTotal"></div>
-    <textarea id="commentInput" placeholder="코멘트 (선택)">${sub.comment || ''}</textarea>
-    <div class="modal-actions">
-      <button class="ghost" onclick="closeModal()">취소</button>
-      <button class="accent" onclick="saveGrade('${studentId}','${sub.id}')">저장</button>
-    </div>
-  `;
-  document.getElementById('modalOverlay').style.display = 'flex';
-  updateModalTotal();
-}
-function updateModalTotal(){
-  const inputs = document.querySelectorAll('.score-input');
-  let total = 0;
-  inputs.forEach(i=> total += Number(i.value) || 0);
-  const max = MOVEMENTS.reduce((a,m)=> a + (m.maxScore ?? 2), 0);
-  document.getElementById('modalTotal').textContent = `총점: ${total} / ${max}`;
-}
-function closeModal(){ document.getElementById('modalOverlay').style.display = 'none'; }
-
-async function saveGrade(studentId, subId){
-  const inputs = document.querySelectorAll('.score-input');
-  const scores = Array.from(inputs).map(i => Number(i.value) || 0);
-  const total = scores.reduce((a,b)=>a+b, 0);
-  const comment = document.getElementById('commentInput').value.trim();
-
-  await db.collection('submissions').doc(subId).update({
-    scores, total, comment, status: 'graded',
-    gradedAt: firebase.firestore.FieldValue.serverTimestamp()
-  });
-  closeModal();
-  refreshDashboard();
-}
-
-/* ---------- CSV 내보내기 ---------- */
-async function exportCsv(){
-  const classId = document.getElementById('dashClassSelect').value;
-  if (!classId){ alert('학급을 먼저 선택하세요.'); return; }
-  const students = window._dashStudents || [];
-  const subs = window._dashSubs || {};
-  const className = classesCache.find(c=>c.id===classId)?.name || classId;
-
-  const header = ['번호','이름','모둠','전문가주제','상태','총점', ...MOVEMENTS.map(m=>m.name)];
-  const lines = [header.join(',')];
-  students.forEach(s=>{
-    const sub = subs[s.id];
-    const status = !sub ? '미제출' : (sub.status === 'graded' ? '채점완료' : '채점대기');
-    const total = sub && sub.status === 'graded' ? sub.total : '';
-    const scores = sub && sub.scores && sub.scores.length ? sub.scores : MOVEMENTS.map(()=>'');
-    lines.push([s.number, s.name, s.group ?? '', topicLabel(getTopics(s)), status, total, ...scores].join(','));
-  });
-  const csv = '\uFEFF' + lines.join('\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `점프밴드_${className}_채점결과.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
 }
 </script>
 </body>
