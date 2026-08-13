@@ -77,6 +77,11 @@
     background:#EAF1FF; color:var(--navy); font-size:11px; font-weight:700;
   }
   .assign-table select{width:100%; font-size:13px; padding:7px 8px;}
+  .class-row{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:9px 0; border-bottom:1px solid var(--line); font-size:14px;
+  }
+  .class-row:last-child{border-bottom:none;}
   .topic-select-pair{display:flex; flex-direction:column; gap:4px;}
   .board-grid{display:flex; gap:12px; flex-wrap:wrap;}
   .board-col{
@@ -133,6 +138,7 @@
           <button class="accent" onclick="addClass()">학급 추가</button>
         </div>
         <div class="hint">추가한 학급은 아래 학생 등록과 학생용 페이지 선택 목록에 바로 반영됩니다.</div>
+        <div id="classListWrap" style="margin-top:12px;"></div>
       </div>
 
       <div class="card">
@@ -310,6 +316,40 @@ async function loadClasses(){
     });
     if (current) sel.value = current;
   });
+  renderClassList();
+}
+
+function renderClassList(){
+  const wrap = document.getElementById('classListWrap');
+  if (!classesCache.length){ wrap.innerHTML = '<div class="hint">등록된 학급이 없습니다.</div>'; return; }
+  wrap.innerHTML = classesCache.map(c=>`
+    <div class="class-row">
+      <span>${escapeAttr(c.name)}</span>
+      <button class="danger-ghost" onclick="deleteClass('${c.id}', '${escapeAttr(c.name)}')">삭제</button>
+    </div>
+  `).join('');
+}
+
+async function deleteClass(classId, name){
+  if (!confirm(`"${name}" 학급을 삭제할까요?\n이 학급에 등록된 학생 명단과 모둠·전문가주제 배정 정보가 모두 함께 삭제되며 되돌릴 수 없습니다.`)) return;
+
+  const studentsSnap = await db.collection('classes').doc(classId).collection('students').get();
+  const batch = db.batch();
+  studentsSnap.forEach(doc=> batch.delete(doc.ref));
+  batch.delete(db.collection('classes').doc(classId));
+  await batch.commit();
+
+  if (document.getElementById('rosterClassSelect').value === classId){
+    document.getElementById('rosterClassSelect').value = '';
+  }
+  if (document.getElementById('assignClassSelect').value === classId){
+    document.getElementById('assignClassSelect').value = '';
+    currentAssignStudents = [];
+    document.getElementById('assignTableWrap').innerHTML = '';
+    document.getElementById('groupBoardWrap').innerHTML = '';
+  }
+
+  await loadClasses();
 }
 
 async function addClass(){
