@@ -46,6 +46,12 @@
     font-size:22px;
     font-weight:800;
   }
+  .topbar-row{display:flex; justify-content:space-between; align-items:center; gap:12px;}
+  .qr-btn{
+    flex-shrink:0; background:rgba(255,255,255,.12); color:#fff; border:1.5px solid rgba(255,255,255,.4);
+    padding:9px 14px; border-radius:999px; font-size:13px; font-weight:700; cursor:pointer; font-family:inherit;
+  }
+  .qr-btn:active{background:rgba(255,255,255,.22);}
   .wrap{
     max-width:480px;
     margin:0 auto;
@@ -124,13 +130,46 @@
   .movement-embed{margin-top:10px; aspect-ratio:16/9; border-radius:10px; overflow:hidden; background:#000; display:none;}
   .movement-embed.open{display:block;}
   .movement-embed iframe{width:100%; height:100%; border:0;}
+
+  #qrOverlay{
+    position:fixed; inset:0; background:rgba(22,33,62,.6); display:none;
+    align-items:center; justify-content:center; padding:20px; z-index:100;
+  }
+  #qrOverlay.open{display:flex;}
+  .qr-modal{
+    background:#fff; border-radius:20px; padding:28px 24px; max-width:340px; width:100%;
+    text-align:center;
+  }
+  .qr-modal h3{margin:0 0 4px; font-size:16px; color:var(--navy);}
+  .qr-modal .qr-sub{font-size:12.5px; color:var(--muted); margin-bottom:18px;}
+  .qr-modal .qr-image{width:100%; max-width:260px; margin:0 auto 16px; display:block;}
+  .qr-modal .qr-url{font-size:12px; color:var(--muted); word-break:break-all; margin-bottom:18px;}
+  .qr-close{
+    background:var(--navy); color:#fff; border:none; border-radius:10px;
+    padding:10px 22px; font-weight:700; font-size:14px; cursor:pointer;
+  }
 </style>
 </head>
 <body>
 
 <div class="topbar">
-  <div class="eyebrow">Jump Band Assessment</div>
-  <h1>마석중 2026 점프밴드</h1>
+  <div class="topbar-row">
+    <div>
+      <div class="eyebrow">Jump Band Assessment</div>
+      <h1>마석중 2026 점프밴드</h1>
+    </div>
+    <button class="qr-btn" onclick="openQrModal()">QR 보기</button>
+  </div>
+</div>
+
+<div id="qrOverlay" onclick="if(event.target===this) closeQrModal()">
+  <div class="qr-modal">
+    <h3>학생용 페이지 QR코드</h3>
+    <div class="qr-sub">카메라로 스캔하면 바로 접속돼요</div>
+    <img class="qr-image" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAYYAAAGGAQAAAABX+xtIAAACwklEQVR4nO2cQW7cMAxFP2sDs5SBHGCOotygRypyM/socwN5GcDG74KiRja6MVq7MwK1CBzFD5BAkyK/pAhxrK0/DgKAE0444YQT1xIgudhzIDkGEgjWF1NHjvXLrzkPJ44SJKmmlV+PHsB8IyJJIHyLfgz2bbzyPJw4QEwiAmAVft0XICYA07CKvbaKyHD5qJw4heh3vwsg4HT/FmLuQcwfu8z+NefhxF8QkQsQHzeK3EmRytn/46ic+PeErt0AMMmNGtZjWsWyuY5kunxUTpxIiIiIfALgqEnbAn4NQE7ZZxER6S8elRPnEDllz23R2M4RnXb84ZXXnIcTBxqpRgasJCMBdFqrcQy7v7rN356AeTdJpo7q5+QCXcCzJtOpTuM2b4EwHS6UH5qvddnFS9C3eO82f3ui+HRn67mJrdnt01OedZu3QZjNVWelGVn93Jb3WJI7t3kDxN7PN9l6Tt9038U8/jXn4cQxoqOK6dNQugOpGy0IC+RTOzteOSonziKq2J4310KJ4wnI1g8LLNS7n789UYJ5TtStr2RzIW+z2bfhNn97YlOLl6otcndmwuvzhghUER1mWt0/VxU2ULdXvD5vhrD0PGQd7qm/mMfTzka5nzdCbNI32Nm3ksOZAAt4rdYMUWuvMQF5K+WpydiTazLNECW25wCvnZXiqkI8qdmc27wBYlufl31TFO8ufu57qa0Qda1WhXXN4Ur6Brgm0w6xPydT5ehWnNXh323eCLFKboN5Nx899DrDJH0R4l1vb4Oo13P15FQ0t1S/4vV5a0S+xwLIJ1bhON+I6Z4rND3yGpP7eRvE/h6LtpgGQUxrT8wDEMf8xItG5cSZxN7mxNwtmH4SgvmDEsel5yS60F82KifOJLbrOfNt1Lg//7zA6/NmiO398+f2yvNkHPJS7jpcK4T4/5NxwgknnGiO+A0vEv0DKMtfygAAAABJRU5ErkJggg==" alt="마석중 2026 점프밴드 학생용 페이지 QR코드" />
+    <div class="qr-url">https://namcheoli7-cloud.github.io/Jumpband2026/</div>
+    <button class="qr-close" onclick="closeQrModal()">닫기</button>
+  </div>
 </div>
 
 <div class="wrap">
@@ -368,6 +407,8 @@ function extractYoutubeId(url){
 function formatDate(d){
   return d.toLocaleString('ko-KR', { month:'long', day:'numeric', hour:'2-digit', minute:'2-digit' });
 }
+function openQrModal(){ document.getElementById('qrOverlay').classList.add('open'); }
+function closeQrModal(){ document.getElementById('qrOverlay').classList.remove('open'); }
 </script>
 </body>
 </html>
