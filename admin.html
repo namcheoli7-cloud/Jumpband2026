@@ -82,14 +82,13 @@
     padding:9px 0; border-bottom:1px solid var(--line); font-size:14px;
   }
   .class-row:last-child{border-bottom:none;}
-  .submit-check-row{
-    display:flex; align-items:center; gap:18px; padding:11px 12px;
-    border-bottom:1px solid var(--line); border-radius:10px;
+  .submit-check-box{
+    display:flex; gap:12px; padding:8px 10px; margin-bottom:10px;
+    background:#fff; border:1px solid var(--line); border-radius:10px;
   }
-  .submit-check-row.done{background:#E8FBF9;}
-  .submit-check-row .group-label{font-weight:700; color:var(--navy); width:64px; flex-shrink:0; font-size:14px;}
-  .check-label{display:flex; align-items:center; gap:7px; font-size:14px; color:var(--text); cursor:pointer;}
-  .check-label input{width:18px; height:18px; cursor:pointer; accent-color:var(--teal);}
+  .submit-check-box.done{background:#E8FBF9; border-color:#BFEFEA;}
+  .check-label{display:flex; align-items:center; gap:6px; font-size:12.5px; color:var(--text); cursor:pointer;}
+  .check-label input{width:16px; height:16px; cursor:pointer; accent-color:var(--teal);}
   .qr-btn{
     flex-shrink:0; background:rgba(255,255,255,.12); color:#fff; border:1.5px solid rgba(255,255,255,.4);
     padding:9px 14px; border-radius:999px; font-size:13px; font-weight:700; cursor:pointer; font-family:inherit;
@@ -167,7 +166,6 @@
   <div class="tabs">
     <button class="tab-btn active" data-tab="roster">학급·학생 관리</button>
     <button class="tab-btn" data-tab="materials">학습자료</button>
-    <button class="tab-btn" data-tab="submitcheck">제출 체크</button>
     <button class="tab-btn" data-tab="settings">제출 설정</button>
   </div>
 
@@ -234,19 +232,6 @@
           <span class="hint" id="movementsSaveHint"></span>
         </div>
         <div class="hint">여기서 저장한 동작명·유튜브 링크·배점은 학생용 페이지와 채점 화면에 바로 반영됩니다.</div>
-      </div>
-    </div>
-
-    <!-- 제출 체크 -->
-    <div class="panel" id="panel-submitcheck">
-      <div class="card">
-        <h2>모둠별 영상 제출 체크</h2>
-        <div class="row">
-          <select id="checkClassSelect"><option value="">학급 선택</option></select>
-        </div>
-        <div class="hint">모둠별로 1~6번 동작 영상, 7~12번 동작 영상을 구글 클래스룸에서 확인한 뒤 체크하세요. 체크 즉시 저장됩니다.</div>
-        <div id="submitCheckSummary" class="hint" style="font-weight:700; color:var(--navy);"></div>
-        <div id="submitCheckWrap" style="margin-top:10px;"></div>
       </div>
     </div>
 
@@ -362,7 +347,6 @@ async function loadClasses(){
   const selects = [
     document.getElementById('rosterClassSelect'),
     document.getElementById('assignClassSelect'),
-    document.getElementById('checkClassSelect'),
   ];
   selects.forEach(sel=>{
     const current = sel.value;
@@ -467,6 +451,7 @@ function topicLabelForSize(topicIdx, topicSize){
 /* ---------- 모둠 · 전문가주제 수동 배정 ---------- */
 const TOPIC_COLORS = ['FF6F3C','2EC4B6','28345C','E4552A','8B5FBF','4C9F70','C9A227','1D8A99'];
 let currentAssignStudents = [];
+let currentGroupSubmissions = {};
 
 document.getElementById('assignClassSelect').addEventListener('change', loadAssignmentPanel);
 document.getElementById('groupCount').addEventListener('change', onAssignSettingsChange);
@@ -476,12 +461,17 @@ async function loadAssignmentPanel(){
   const classId = document.getElementById('assignClassSelect').value;
   if (!classId){
     currentAssignStudents = [];
+    currentGroupSubmissions = {};
     document.getElementById('assignTableWrap').innerHTML = '';
     document.getElementById('groupBoardWrap').innerHTML = '';
     return;
   }
-  const snap = await db.collection('classes').doc(classId).collection('students').orderBy('number').get();
-  currentAssignStudents = snap.docs.map(d=>({ id: d.id, ...d.data() }));
+  const [studentsSnap, classDoc] = await Promise.all([
+    db.collection('classes').doc(classId).collection('students').orderBy('number').get(),
+    db.collection('classes').doc(classId).get(),
+  ]);
+  currentAssignStudents = studentsSnap.docs.map(d=>({ id: d.id, ...d.data() }));
+  currentGroupSubmissions = (classDoc.exists && classDoc.data().groupSubmissions) || {};
   renderAssignTable();
   renderGroupBoard();
 }
@@ -663,6 +653,7 @@ function renderGroupBoard(){
   const wrap = document.getElementById('groupBoardWrap');
   if (!currentAssignStudents.length){ wrap.innerHTML = ''; return; }
 
+  const classId = document.getElementById('assignClassSelect').value;
   const groupCount = parseInt(document.getElementById('groupCount').value, 10) || 5;
   const topicSize = parseInt(document.getElementById('topicSizeInput').value, 10) || 2;
   const topicCount = Math.ceil(MOVEMENTS.length / topicSize) || 1;
@@ -675,15 +666,28 @@ function renderGroupBoard(){
     else unassigned.push(s);
   });
 
+  let submittedCount = 0;
   let html = '<div class="board-grid">';
   for (let g = 1; g <= groupCount; g++){
     const members = byGroup[g];
     const covered = new Set();
     members.forEach(m=> getTopics(m).forEach(t=>covered.add(t)));
+    const sub = currentGroupSubmissions[g] || {};
+    if (sub.part1 && sub.part2) submittedCount++;
     html += `
       <div class="board-col">
         <h3>${g}모둠 (${members.length}명)</h3>
         <div class="coverage">전문가 주제 커버 ${covered.size}/${topicCount}</div>
+        <div class="submit-check-box${sub.part1 && sub.part2 ? ' done' : ''}">
+          <label class="check-label">
+            <input type="checkbox" data-class="${classId}" data-group="${g}" data-part="part1" ${sub.part1 ? 'checked' : ''} onchange="onSubmitCheckChange(this)" />
+            1~6번
+          </label>
+          <label class="check-label">
+            <input type="checkbox" data-class="${classId}" data-group="${g}" data-part="part2" ${sub.part2 ? 'checked' : ''} onchange="onSubmitCheckChange(this)" />
+            7~12번
+          </label>
+        </div>
         ${members.map(chipHtml).join('') || '<div class="hint">배정된 학생 없음</div>'}
       </div>
     `;
@@ -698,7 +702,20 @@ function renderGroupBoard(){
     `;
   }
   html += '</div>';
-  wrap.innerHTML = html;
+  wrap.innerHTML = `<div class="hint" style="font-weight:700; color:var(--navy); margin-bottom:10px;">영상 제출 ${submittedCount} / ${groupCount}모둠 완료</div>${html}`;
+}
+
+async function onSubmitCheckChange(el){
+  const classId = el.dataset.class;
+  const group = el.dataset.group;
+  const part = el.dataset.part;
+  const value = el.checked;
+
+  await db.collection('classes').doc(classId).update({
+    [`groupSubmissions.${group}.${part}`]: value,
+  });
+  currentGroupSubmissions[group] = { ...(currentGroupSubmissions[group] || {}), [part]: value };
+  renderGroupBoard();
 }
 
 function chipHtml(m){
@@ -714,55 +731,6 @@ function chipHtml(m){
       <span class="topic-num">${topicText}</span>
     </div>
   `;
-}
-
-/* ---------- 제출 체크 ---------- */
-document.getElementById('checkClassSelect').addEventListener('change', loadSubmitCheck);
-
-async function loadSubmitCheck(){
-  const classId = document.getElementById('checkClassSelect').value;
-  const wrap = document.getElementById('submitCheckWrap');
-  const summary = document.getElementById('submitCheckSummary');
-  if (!classId){ wrap.innerHTML = ''; summary.textContent = ''; return; }
-
-  const groupCount = parseInt(document.getElementById('groupCount').value, 10) || 5;
-  const classDoc = await db.collection('classes').doc(classId).get();
-  const subs = (classDoc.exists && classDoc.data().groupSubmissions) || {};
-
-  let doneCount = 0;
-  let rows = '';
-  for (let g = 1; g <= groupCount; g++){
-    const s = subs[g] || {};
-    const isDone = !!(s.part1 && s.part2);
-    if (isDone) doneCount++;
-    rows += `
-      <div class="submit-check-row${isDone ? ' done' : ''}">
-        <span class="group-label">${g}모둠</span>
-        <label class="check-label">
-          <input type="checkbox" data-class="${classId}" data-group="${g}" data-part="part1" ${s.part1 ? 'checked' : ''} onchange="onSubmitCheckChange(this)" />
-          1~6번
-        </label>
-        <label class="check-label">
-          <input type="checkbox" data-class="${classId}" data-group="${g}" data-part="part2" ${s.part2 ? 'checked' : ''} onchange="onSubmitCheckChange(this)" />
-          7~12번
-        </label>
-      </div>
-    `;
-  }
-  summary.textContent = `${doneCount} / ${groupCount}모둠 제출 완료`;
-  wrap.innerHTML = rows;
-}
-
-async function onSubmitCheckChange(el){
-  const classId = el.dataset.class;
-  const group = el.dataset.group;
-  const part = el.dataset.part;
-  const value = el.checked;
-
-  await db.collection('classes').doc(classId).update({
-    [`groupSubmissions.${group}.${part}`]: value,
-  });
-  loadSubmitCheck();
 }
 
 /* ---------- 제출 설정 ---------- */
